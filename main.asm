@@ -2,27 +2,31 @@
 ; EECS X497.2
 ; Final Project: Oscillscope
 ;
+; With a 48x84 pixel Nokia LCD, we can clearly see sine waves up to around 4Hz.
+; We can draw much faster than this but it becomes indiscernible on this screen.
+;
+; Target: Ardiuno UNO R3
 ; Created: 2016/08/28
 ; Author : Stephen Lang
 ;
 
 ; SPI port
-.equ	DDR_SPI		= DDRB
+.equ	DDR_SPI		= DDRB		; All SPI pins are on Port B of the ATmega
 
 ; SPI pins
-.equ	DD_SS		= DDB2
-.equ	DD_MOSI		= DDB3
-.equ	DD_SCK		= DDB5
+.equ	DD_SS		= DDB2		; Not used but _must_ be set to output regardless
+.equ	DD_MOSI		= DDB3		; _Must_ use this pin for hardware SPI output
+.equ	DD_SCK		= DDB5		; _Must_ use this pin for hardware SPI clock
 
 ; LCD port
-.equ	DDR_LCD		= DDRD
+.equ	DDR_LCD		= DDRD		; All LCD pins are kept to Port D for simplicity
 .equ	PORT_LCD	= PORTD
 
 ; LCD pins
-.equ	DD_LCDRST	= DDD3
-.equ	DD_LCDSCE	= DDD4
-.equ	DD_LCDDC	= DDD5
-.equ	DD_LCDLED	= DDD6
+.equ	DD_LCDRST	= DDD3		; Reset
+.equ	DD_LCDSCE	= DDD4		; Enable
+.equ	DD_LCDDC	= DDD5		; Data/Command select
+.equ	DD_LCDLED	= DDD6		; LED Backlight
 .equ	PIN_LCDRST	= 3
 .equ	PIN_LCDSCE	= 4
 .equ	PIN_LCDDC	= 5
@@ -35,20 +39,184 @@
 	rjmp	RESET
 
 RESET:
-	rcall	PWM_Init
-	rcall	SPI_MasterInit
-	rcall	LCD_Init
-	rcall	ADC_Init
-	rcall	LCD_BootMessages
+	rcall	PWM_Init			; Pulse-Width Modulation (backlight dimming)
+	rcall	SPI_MasterInit		; Serial Peripheral Interface (for LCD comms)
+	rcall	LCD_Init			; Liquid Crystal Display (Nokia 5110)
+	rcall	ADC_Init			; Analogue-to-Digital Converter (for the scope probe input)
+	;rcall	LCD_BootMessages	; Print intro text to LCD (over SPI)
+	rcall	PWM_FadeIn
 
-MAIN_Loop:
-	;rcall	LCD_Vertical
+MAIN:
+	;rjmp	LCD_ADCBitStream
+	
+	rcall	LCD_Clear
+
+	; In vertical addressing mode, we draw a column at a time.
+	; Unlike horizontal addressing where we would draw a row (e.g. text)
+	rcall	LCD_Vertical
+
+	MAIN_Loop:
+		rcall	PAUSE_Short		; Slow down our draw, the LCD can't cope with it (ghosting)
+		rcall	ADC_Read		; Grab an 8-bit left-aligned conversion result into r22
+
+		; Screen is 84 pixels high
+		; Input voltage range is 0 - 5V
+		; y=0  at 5V (when r22 is 0xFF)
+		; y=83 at 0V (when r22 is 0x00)
+
+		; We write one column at a time, always a pixel in each column,
+		; the LCD deals with wrap-around so we don't have to.
+
+		; Take r22 (ADCH) and work out which row to draw on:
+		;
+		; Row  | Values   | Range
+		; -----------------------  
+		; 0x40   213 - 255   42
+		; 0x41   170 - 212   42
+		; 0x42   127 - 169   42
+		; 0x43    84 - 126   42
+		; 0x44    42 - 83    41
+		; 0x45     0 - 41    41
+		;
+		cpi		r22, 213		; if r21 >= 213
+		brsh	DataInRow0
+		cpi		r22, 170		; else if r21 >= 170
+		brsh	DataInRow1
+		cpi		r22, 127		; else if r21 >= 127
+		brsh	DataInRow2
+		cpi		r22, 84			; else if r21 >= 84
+		brsh	DataInRow3
+		cpi		r22, 42			; else if r21 >= 42
+		brsh	DataInRow4
+		rjmp	DataInRow5		; else
+
+		DataInRow0:
+			ldi		SpiTmp, 0b1111_1111	; Draw pixel
+			rcall	LCD_WriteData
+
+			; Clear other rows
+			ldi		SpiTmp, 0
+			rcall	LCD_WriteData
+			ldi		SpiTmp, 0
+			rcall	LCD_WriteData
+			ldi		SpiTmp, 0
+			rcall	LCD_WriteData
+			ldi		SpiTmp, 0
+			rcall	LCD_WriteData
+			ldi		SpiTmp, 0
+			rcall	LCD_WriteData
+			
+			rjmp	Main_Loop
+
+		DataInRow1:
+			; Clear other rows
+			ldi		SpiTmp, 0
+			rcall	LCD_WriteData
+
+			ldi		SpiTmp, 0b1111_1111 ; Draw pixel
+			rcall	LCD_WriteData
+
+			; Clear other rows
+			ldi		SpiTmp, 0
+			rcall	LCD_WriteData
+			ldi		SpiTmp, 0
+			rcall	LCD_WriteData
+			ldi		SpiTmp, 0
+			rcall	LCD_WriteData
+			ldi		SpiTmp, 0
+			rcall	LCD_WriteData
+			
+			rjmp	Main_Loop
+
+		DataInRow2:
+			; Clear other rows
+			ldi		SpiTmp, 0
+			rcall	LCD_WriteData
+			ldi		SpiTmp, 0
+			rcall	LCD_WriteData
+
+			ldi		SpiTmp, 0b1111_1111 ; Draw pixel
+			rcall	LCD_WriteData
+
+			; Clear other rows
+			ldi		SpiTmp, 0
+			rcall	LCD_WriteData
+			ldi		SpiTmp, 0
+			rcall	LCD_WriteData
+			ldi		SpiTmp, 0
+			rcall	LCD_WriteData
+			
+			rjmp	Main_Loop
+
+		DataInRow3:
+			; Clear other rows
+			ldi		SpiTmp, 0
+			rcall	LCD_WriteData
+			ldi		SpiTmp, 0
+			rcall	LCD_WriteData
+			ldi		SpiTmp, 0
+			rcall	LCD_WriteData
+
+			ldi		SpiTmp, 0b1111_1111 ; Draw pixel
+			rcall	LCD_WriteData
+
+			; Clear other rows
+			ldi		SpiTmp, 0
+			rcall	LCD_WriteData
+			ldi		SpiTmp, 0
+			rcall	LCD_WriteData
+			
+			rjmp	Main_Loop
+
+		DataInRow4:
+			; Clear other rows
+			ldi		SpiTmp, 0
+			rcall	LCD_WriteData
+			ldi		SpiTmp, 0
+			rcall	LCD_WriteData
+			ldi		SpiTmp, 0
+			rcall	LCD_WriteData
+			ldi		SpiTmp, 0
+			rcall	LCD_WriteData
+
+			ldi		SpiTmp, 0b1111_1111 ; Draw pixel
+			rcall	LCD_WriteData
+
+			; Clear other rows
+			ldi		SpiTmp, 0
+			rcall	LCD_WriteData
+			
+			rjmp	Main_Loop
+
+		DataInRow5:
+			; Clear other rows
+			ldi		SpiTmp, 0
+			rcall	LCD_WriteData
+			ldi		SpiTmp, 0
+			rcall	LCD_WriteData
+			ldi		SpiTmp, 0
+			rcall	LCD_WriteData
+			ldi		SpiTmp, 0
+			rcall	LCD_WriteData
+			ldi		SpiTmp, 0
+			rcall	LCD_WriteData
+
+			ldi		SpiTmp, 0b1111_1111 ; Draw pixel
+			rcall	LCD_WriteData
+
+			rjmp	Main_Loop
+	
+; Displays 10-bit binary value from ADC0 using bit-banging.
+; Expects right-aligned ADC capture.
+;
+; @param	r21	ADCL
+; @param	r22	ADCH
+LCD_ADCBitStream:
 	rcall	ADC_Read
-
 	ldi		r19, 0
-	ldi		r20, 0x07
+	ldi		r20, 0x07 ; read bits [0:7]
 	BIT_Loop0:
-		ror		r21 ; rotate bit 0 into carry
+		ror		r21 ; rotate bit 0 into carry from ADCL
 		brcs	TEXT_Else0 ; branch if carry bit is high
 			rcall	LCD_Text0
 			rjmp	TEXT_EndIf0
@@ -60,9 +228,9 @@ MAIN_Loop:
 		brge	BIT_Loop0
 
 	ldi		r19, 0
-	ldi		r20, 0x01
+	ldi		r20, 0x01 ; read bits [0:1]
 	BIT_Loop1:
-		ror		r22 ; rotate bit 0 into carry
+		ror		r22 ; rotate bit 0 into carry from ADCH
 		brcs	TEXT_Else1 ; branch if carry bit is high
 			rcall	LCD_Text0
 			rjmp	TEXT_EndIf1
@@ -73,25 +241,23 @@ MAIN_Loop:
 		cp		r20, r19
 		brge	BIT_Loop1
 
-	ldi		r19, 1
 	rcall	PAUSE_Short
 
 	rcall	LCD_Clear
-	rjmp	MAIN_Loop
+	rjmp	LCD_ADCBitStream
 
+; Initialise A/D multiplex register for ADC0
+; Use Vcc (5V) as reference voltage
 ADC_Init:
-	; Use Vcc (5V) as reference voltage and left-adjust
-	ldi		r17, (1<<REFS0) | (1<<ADLAR)
-	sts		ADMUX, r17 ; out of range for OUT
+	ldi		r17, (1<<REFS0) | (1<<ADLAR)	; left-align bits
+	sts		ADMUX, r17						; out of range for OUT, using STS instead
 	ret
 
-; Reads ADCL into r21 and ADCH into r22
+; Reads ADCL into r21 and ADCH into r22.
+; Up to 10-bit ADC, left- or right- aligned as per ADMUX[ADLAR]
 ADC_Read:
-	ldi		r17, (1<<REFS0) | 0 ; ADC0
-	sts		ADMUX, r17
-
-	; Enable ADC with a clock division factor of 128 (125kHz?)
-	ldi		r17, (1<<ADEN) | (1<<ADSC); | (1<<ADPS2) | (1<<ADPS1) | (1<<ADPS0)
+	; Enable ADC with a clock division factor of 111 = /128 (125 kHz) or 110 = /64 (250kHz)
+	ldi		r17, (1<<ADEN) | (1<<ADSC) | (1<<ADPS2) | (1<<ADPS1); | (1<<ADPS0)
 	sts		ADCSRA, r17
 
 	ADC_Wait:
@@ -100,6 +266,7 @@ ADC_Read:
 		rjmp	ADC_Wait
 		lds		r21, ADCL
 		lds		r22, ADCH
+	ret
 
 SPI_MasterInit:
 	; Set MOSI and SCK output, all others input
@@ -111,19 +278,18 @@ SPI_MasterInit:
 
 ; Sends r16 to SPDR (SPI Data Register)
 SPI_MasterTransmit:
-	; Start transmission of data
-	out		SPDR, r16
+	out		SPDR, r16	; Start transmission of data
 SPI_WaitTransmit:
 	; Wait for transmission to complete
-	in		r16, SPSR ; SPI Status Register
-	sbrs	r16, SPIF ; SPI Transmission Flag
+	in		r16, SPSR	; SPI Status Register
+	sbrs	r16, SPIF	; SPI Transmission Flag
 	rjmp	SPI_WaitTransmit
 	ret
 
-; 8 bit PWM
+; Initialise 8 bit Pulse-Width Modulation
 PWM_Init:
 	; OCR0A - Output Compare Register A
-	ldi		r16, 0xFF ; Set initial duty cycle to always HIGH so LCD backlight starts OFF
+	ldi		r16, 0xFF	; Set initial duty cycle to always HIGH so LCD backlight starts OFF
 	out		OCR0A, r16
 	
 	; TCCR0A - Timer/Counter Control Register A
@@ -164,7 +330,7 @@ PWM_FadeOutLoop:
 	ret
 
 ; Simple pause function
-; @param r19
+; @param r19 Delay multiplier
 PAUSE_Long:
 	PAUSE0:
 		ldi		r20, 255
@@ -179,6 +345,7 @@ PAUSE_Long:
 			brne	PAUSE0
 		ret
 
+; Delay depends on the timer clock prescaler value in TCCR0B[CS[02:00]]
 PAUSE_Short:
 	in		r16, TIFR0 ; Wait for timer interrupt flag
 	andi	r16, 0b0000_0010
@@ -198,16 +365,16 @@ LCD_Init:
 	sbi		PORT_LCD, PIN_LCDRST
 
 	; Setup LCD
-	ldi		SpiTmp, 0x21 ; Tell LCD extended commands follow
+	ldi		SpiTmp, 0x21	; Tell LCD extended commands follow
 	rcall	LCD_WriteCommand
-	ldi		SpiTmp, 0xB0 ; Set LCD Vop (Contrast)
+	ldi		SpiTmp, 0xB0	; Set LCD Vop (Contrast)
 	rcall	LCD_WriteCommand
-	ldi		SpiTmp, 0x04 ; Set Temp coefficent
+	ldi		SpiTmp, 0x04	; Set Temp coefficent
 	rcall	LCD_WriteCommand
-	ldi		SpiTmp, 0x13 ; LCD bias mode 1:48 (try 0x13)
+	ldi		SpiTmp, 0x14	; LCD bias mode 1:48
 	rcall	LCD_WriteCommand
 	rcall	LCD_Horizontal
-	ldi		SpiTmp, 0x0C ; Set display control, 0C normal mode, 0D inverse
+	ldi		SpiTmp, 0x0C	; Set display control, 0C normal mode, 0D inverse
 	rcall	LCD_WriteCommand
 
 	rcall	LCD_Clear
