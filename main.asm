@@ -47,6 +47,8 @@ RESET:
 	rcall	LCD_Init			; Liquid Crystal Display (Nokia 5110)
 	rcall	ADC_Init			; Analogue-to-Digital Converter (for the scope probe input)
 	rcall	LCD_BootMessages	; Print intro text to LCD (over SPI)
+	;rcall	PWM_FadeIn
+	;rcall	LCD_Clear
 
 MAIN:
 	;rjmp	LCD_ADCBitStream	; Show raw 10-bit ADC data in binary (for testing)
@@ -75,7 +77,7 @@ MAIN:
 	; 1) 8-bit ADC mode on the ATmega allows for a higher sample rate
 	; 2) Simpler code.
 	MAIN_Loop:
-		rcall	PAUSE_Short		; Slow down our draw, the LCD can't cope with it (ghosting)
+		rcall	PAUSE_Short		; Slow down our draw, easy way to avoid horizontal scaling
 		rcall	ADC_Read		; Grab an 8-bit left-aligned conversion result into r22
 
 		; Row  | Values   | Range
